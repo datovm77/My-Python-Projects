@@ -9,7 +9,7 @@ import docx              ##用于创建、修改和读取 Microsoft Word (.docx)
 ##streamlit run app.py
 
 # ================= 配置区域 =================
-API_KEY = "sk-VozehGIanZ5PcgTB3BjyZbITp1m1eiYwn64kyGPRafwGOE2B" # 记得填回你的 Key
+API_KEY = "" # 记得填回你的 Key
 BASE_URL = "https://api.getgoapi.com/v1"
 MODEL_NAME = "gemini-3-pro-preview"   ##gemini-3-flash-preview   gemini-3-pro-preview
 HISTORY_FILE = "history.json"
