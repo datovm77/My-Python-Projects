@@ -1,89 +1,65 @@
-from fastapi import FastAPI,Path,Query
-from pydantic import BaseModel,Field
-# uvicorn main:app --reload
+import os
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import List, Dict
+from openai import OpenAI
+from fastapi.responses import StreamingResponse
+from dotenv import load_dotenv
+
+# 1. 加载环境变量
+load_dotenv()
+API_KEY = os.getenv("OPENROUTER_API_KEY")
+
+# 2. 初始化 OpenAI 客户端 (指向 OpenRouter)
+# OpenRouter 本质上是一个“路由器”，兼容 OpenAI 协议
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=API_KEY,
+)
 
 app = FastAPI()
 
-@app.get("/")
-async def read_root():
-    return {"message": "Hello World"}
+# 3. 定义请求模型
+# 我们模仿 OpenAI 的官方格式：接收一个消息列表
+class ChatRequest(BaseModel):
+    messages: List[Dict[str, str]] 
+    # 示例: [{"role": "user", "content": "你好"}]
+    model: str = "openai/gpt-oss-120b" 
+    # 你可以在 OpenRouter 上找任何你喜欢的免费或付费模型
 
-# @app.get("/hello/{name}")
-# async def say_hello(name: str):
-#     # 注意这里加了 f，大括号里的变量才会生效
-#     return {"message": f"hello {name}"}
+# 4. 核心逻辑：生成器函数
+# 这个函数会像流水线一样，拿到一点数据就 yield (产出) 一点
+def generate_stream(messages: list, model: str):
+    try:
+        stream = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            stream=True, # 关键：开启流式模式
+            # OpenRouter 建议加这俩 Header，方便在排行榜显示你的应用（可选）
+            extra_headers={
+                "HTTP-Referer": "https://your-site.com", 
+                "X-Title": "My FastAgent", 
+            }
+        )
+        
+        for chunk in stream:
+            # 提取增量内容
+            content = chunk.choices[0].delta.content
+            if content:
+                yield content
 
-#访问/hello   响应结果 msg: 你好 FastAPI
-@app.get("/hello")
-async def get_hello():
-    return{"msg":"你好FASTAPI"}
+    except Exception as e:
+        yield f"Error: {str(e)}"
 
-@app.get("/book/{id}")
-async def get_book(id:int = Path(...,gt = 0,lt = 101,description="书籍的id")):
-    return {"id":id,"title":f"这是第{id}本书"} 
+# 5. 定义 API 接口
+@app.post("/chat")
+async def chat_endpoint(request: ChatRequest):
+    # 使用 StreamingResponse 包装生成器
+    return StreamingResponse(
+        generate_stream(request.messages, request.model), 
+        media_type="text/event-stream"
+    )
 
-#查找数据作者，路径参数 name ，长度范围 2-10
-@app.get("/author/{name}")
-async def get_name(name:str = Path(...,min_length=2,max_length=15)):
-    return {"msg":f"这是{name}的信息"}
-
-
-#需求 查询新闻 分页  skip：跳过的记录数，limit：返回的记录数 
-@app.get("/news/news_list")
-async def get_news_list(
-    skip:int = Query(0,description="跳过的记录数",lt = 100),
-    limit:int = 10
-):
-    return {"skip":skip,"limit":limit}
-
-@app.get("/books")
-async def get_books(
-    # 1. 图书分类：
-    # - 默认值："Python开发" (写在第一个参数)
-    # - 长度限制：min_length=5, max_length=255
-    category: str = Query("Python开发", min_length=5, max_length=255, description="图书分类"),
-    
-    # 2. 价格：
-    # - 题目没说默认值，我们假设它是“必填”的，所以用 ... (Ellipsis)
-    # - 范围限制：50 ~ 100。
-    # - ge=50 (大于等于50), le=100 (小于等于100)
-    price: int = Query(..., ge=50, le=100, description="价格")
-):
-    return {"category": category, "price": price, "msg": "查询成功"}
-
-##请求体：POST PUT 
-#注册：用户名与密码
-class User(BaseModel):
-    username:str = Field(default="ZAHNGSAN",min_length= 2 ,max_length= 10)
-    password:str = Field(min_length=3,max_length=20)
-
-
-@app.post("/register")
-async def register(user :User):
-    return user
-
-
-
- 
-
-
-
-
-
-
-class Book(BaseModel):
-    title: str      # 书名
-    author: str     # 作者
-    publisher: str  # 出版社
-    price: float    # 售价 (金额通常用 float 浮点数，或者 decimal)
-
-# --- 第二步：编写接口 ---
-@app.post("/add_book")
-async def add_book(book: Book):
-    # 这里通常会写保存到数据库的代码
-    # 现在我们只是演示，直接把收到的数据打印出来或者返回回去
-    print(f"收到了新书：{book.title}, 价格：{book.price}")
-    
-    return {"msg": "添加成功", "book_info": book}
-
-
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
